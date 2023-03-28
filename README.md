@@ -37,9 +37,9 @@ Based on the above design requirements, HashiCorp Vault seems to check off all t
 
 If you already have a running PostgreSQL database, please find out the database hostname, port, and required credentials in order to connect. In case you don't, follow [these instructions](https://docs.aiven.io/docs/platform/howto/create_new_service) to create an Aiven for PostgreSQL service. 
 
-## Connect to a database
-
 If you're bringing your own PostgreSQL service, [create a database](https://www.postgresql.org/docs/current/sql-createdatabase.html) first. If you're using Aiven for PostgreSQL service, there's a database called **defaultdb** already running out-of-the-box.
+
+## Create some tables
 
 Let's create two tables - one table (**employee_salary**) will have private information that should be protected and the other table (**weekly_metrics_reporting**) will contain public information. The app should have both read and write access to the weekly_metrics_reporting table and no access to the employee_salary table. The following blocks of SQL code will help you create these two tables using the **psql** terminal tool. For this exercise, you can skip `?sslmode=require` when connecting to Aiven for Postgresql service using psql. When this setting is used, the server certificate is validated against the CA (certificate authority).
 
