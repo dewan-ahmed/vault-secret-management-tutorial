@@ -33,13 +33,15 @@ You're thinking "this is preposterous!" In your first 30 days at the company, yo
 
 Based on the above design requirements, HashiCorp Vault seems to check off all the boxes. Let's build the POC together to properly authenticate, authorize, and audit the human and machine users of Crab Inc.
 
-## Connect to a PostgreSQL database
+## Plumbing work
+
+### Connect to a PostgreSQL database
 
 If you already have a running PostgreSQL database, please find out the database hostname, port, and required credentials in order to connect. In case you don't, follow [these instructions](https://docs.aiven.io/docs/platform/howto/create_new_service) to create an Aiven for PostgreSQL service. 
 
 If you're bringing your own PostgreSQL service, [create a database](https://www.postgresql.org/docs/current/sql-createdatabase.html) first. If you're using Aiven for PostgreSQL service, there's a database called **defaultdb** already running out-of-the-box.
 
-## Create some tables
+### Create some tables
 
 Let's create two tables - one table (**employee_salary**) will have private information that should be protected and the other table (**weekly_metrics_reporting**) will contain public information. The app should have both read and write access to the weekly_metrics_reporting table and no access to the employee_salary table. The following blocks of SQL code will help you create these two tables using the **psql** terminal tool. For this exercise, you can skip `?sslmode=require` when connecting to Aiven for Postgresql service using psql. When this setting is used, the server certificate is validated against the CA (certificate authority).
 
@@ -51,7 +53,7 @@ If this is an Aiven for PostgreSQL service, the values for [USER], [PASSWORD], [
 
 If you're using a local PostgreSQL database, you can replace the [HOST] portion with localhost, [PORT] with 5432, and [USER]/[PASSWORD] with a valid database credential with admin-level access.
 
-## Add some data
+### Add some data
 
 Let's create two tables - **weekly_metrics_reporting** and **employee_salary**:
 
@@ -88,7 +90,7 @@ insert into employee_salary (emp_no, salary, name, hire_date) values (124, 65000
 insert into employee_salary (emp_no, salary, name, hire_date) values (127, 50000, 'John Doe', '2020-01-29');
 ```
 
-## Set up HashiCorp Vault
+### Set up HashiCorp Vault
 
 For a production workload, you would be running Vault in a dedicated virtual machine with high availability. For this exercise, however, you'll be installing the community version of the software on your local machine. [Download and install](https://www.vaultproject.io/downloads) Vault and start the dev server:
 
@@ -118,7 +120,9 @@ export VAULT_ADDR='http://127.0.0.1:8200'
 
 Every Vault command that talks to the Vault server, uses the `VAULT_ADDR` environment variable. If this environment variable is not set, the user needs to pass the `-address` flag with every command. Once the CLI knows the address of the Vault server, it needs to know that you have the right credential to unlock the vault server. For the dev environment, the Vault server is already started in an unlocked state and the dev root token is persisted locally for use in future requests. 
 
-## Configure PostgreSQL Database Secrets Engine in Vault
+## Challenge 1: Enforce table-level access control with dynamic passwords
+
+### Configure PostgreSQL Database Secrets Engine in Vault
 
 Vault secrets engines are components which store/generate secrets and are enabled at a "path" in Vault. By default, the secrets engine will be enabled at the name of the engine - `database` in this case. To enable the secrets engine at a different path, you can use the `-path` argument.
 
@@ -127,6 +131,8 @@ vault secrets enable database
 ```
 
 I used the following command to configure Vault with the proper plugin and connection information. I'll explain some parts of the command. `vault write database` writes data to Vault at the specified path. This data can be credentials, secrets, configuration, or arbitrary data. Since we have a database configuration mounted in the path, Vault expects database specific parameters, such as `plugin_name`, `allowed_roles`, etc. 
+
+### Create a Vault role to enforce table-level access control
 
 In my example, I'm creating a role `metrics-readwrite` in the `defaultdb` database with a valid database credential that has the appropriate permissions to perform actions upon other database users (create, update credentials, delete, etc.). Note that typically an admin will configure Vault as your developer or application should not have the privileged database credential. Once the administrator configures Vault (a less frequent task), the developer or application can use their Vault token to request less privileged and time-bound database credentials (more frequent tasks).
 
@@ -156,7 +162,7 @@ vault write database/roles/metrics-readwrite \
 
 You can also expand the access for this role to multiple tables based on your need.
 
-## Generate credentials on demand
+### Generate credentials on demand
 
 Now that we're all set, let's generate a dynamic credential for the weekly metrics reporting app. Assuming that your application developer has access (a valid Vault token) to talk to the Vault server, they can programmatically generate credentials:
 
@@ -212,3 +218,55 @@ ERROR:  permission denied for table employee_salary
 The following diagram covers the flow of generating and using the dynamic secret.
 
 ![Vault flow](assets/vault_flow.jpeg)
+
+## Challenge 2: Audit who has accessed the database
+
+Vault's audit log contains every authenticated interaction with Vault, including errors. By default, audit functionality is not enabled in Vault.
+
+### Use database audit device 
+
+```
+vault audit enable database \
+  plugin_name=postgresql-database-plugin \
+  connection_url="postgresql://{{username}}:{{password}}@[HOST]:[PORT]/defaultdb" \
+  options='{"database":"defaultdb","table":"audit_logs"}'
+```
+
+Now, when a user requests credentials from Vault using the **metrics-readwrite** role, Vault will log an audit event to the **audit_logs** table in the my_database database.
+
+### Use file audit device
+
+```
+vault audit enable -path "vault_file_audit" file file_path=/var/log/vault_audit.log
+```
+
+In this case, when a user requests credentials from Vault using the **metrics-readwrite** role, Vault will log an audit event to the **vault_audit.log** file in the local machine. A note that the credentials on the audit log will be hashed with a salt using HMAC-SHA256. 
+
+### From audit log to specific user/app identity
+
+The SysAdmin team of Crab Inc. is very impressed with Vault's auditing capabilities. However, they're unsure how they can track an individual based on the hashed credentials from an audit log.
+
+The **/sys/audit-hash** endpoint is used to calculate the hash of the data used by an audit device's hash function and salt. The same endpoint can be used to discover whether a given plaintext string appears in the audit log in hashed form.
+
+For example, you suspect username **v-root-metrics--V7OeOHoN5Vca3qhd8JJk-1647544001** had unauthorized access to the database and you would like to find the relevant entry in the audit log.
+
+You can make an API call to the **/sys/audit-hash** endpoint with a JSON payload. Let's create the JSON payload. Create a file called **payload.json** and add the following:
+
+
+```JSON
+{
+  "input": "v-root-metrics--V7OeOHoN5Vca3qhd8JJk-1647544001"
+}
+```
+
+The following is a sample request:
+
+```shell
+curl \
+    --header "X-Vault-Token: ..." \
+    --request POST \
+    --data @payload.json \
+    http://127.0.0.1:8200/v1/sys/audit-hash/example-audit
+```
+
+For **X-Vault-Token**, use a valid Vault token with appropriate permission. The sample URL in this API call is assuming you're running Vault locally. 
