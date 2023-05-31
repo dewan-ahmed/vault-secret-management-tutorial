@@ -270,3 +270,7 @@ curl \
 ```
 
 For **X-Vault-Token**, use a valid Vault token with appropriate permission. The sample URL in this API call is assuming you're running Vault locally. 
+
+## Reference
+
+[Secure your database access with HashiCorp Vault](https://aiven.io/developer/secure-your-db-with-vault)
