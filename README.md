@@ -223,17 +223,6 @@ The following diagram covers the flow of generating and using the dynamic secret
 
 Vault's audit log contains every authenticated interaction with Vault, including errors. By default, audit functionality is not enabled in Vault.
 
-### Use database audit device 
-
-```
-vault audit enable database \
-  plugin_name=postgresql-database-plugin \
-  connection_url="postgresql://{{username}}:{{password}}@[HOST]:[PORT]/defaultdb" \
-  options='{"database":"defaultdb","table":"audit_logs"}'
-```
-
-Now, when a user requests credentials from Vault using the **metrics-readwrite** role, Vault will log an audit event to the **audit_logs** table in the defaultdb database.
-
 ### Use file audit device
 
 ```
