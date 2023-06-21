@@ -232,7 +232,7 @@ vault audit enable database \
   options='{"database":"defaultdb","table":"audit_logs"}'
 ```
 
-Now, when a user requests credentials from Vault using the **metrics-readwrite** role, Vault will log an audit event to the **audit_logs** table in the my_database database.
+Now, when a user requests credentials from Vault using the **metrics-readwrite** role, Vault will log an audit event to the **audit_logs** table in the defaultdb database.
 
 ### Use file audit device
 
